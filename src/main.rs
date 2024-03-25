@@ -1,17 +1,21 @@
-use std::collections::HashMap;
-use std::rc::Rc;
-use std::rc::Weak;
-use std::cell::RefCell;
+use std::{
+  cell::RefCell,
+  rc::{Rc, Weak},
+};
 
 #[derive(Debug)]
 struct User {
-  room: Rc<Room>,
+  name: String,
+  rooms: Vec<Rc<Room>>,
 }
 
 impl Drop for User {
   fn drop(&mut self) {
-    println!("Dropping user in room {}", self.room.name);
-    self.room.users.borrow_mut().retain(|u| u.upgrade().is_some());
+      println!("Dropping user=\"{}\" from rooms=\"{:?}\"", self.name, self.rooms);
+      // Remove user from all rooms
+      self.rooms.iter().for_each(|room| {
+          room.users.borrow_mut().retain(|element| element.upgrade().is_some());
+      });
   }
 }
 
@@ -23,59 +27,51 @@ struct Room {
 
 impl Drop for Room {
   fn drop(&mut self) {
-    println!("Dropping room {}", self.name);
+      println!("Dropping room {}", self.name);
   }
 }
 
 
-fn make_user(room_rc: &Rc<Room>) -> Rc<User> {
-  let user = User { room: room_rc.clone() };
-  let user_rc = Rc::new(user);
-  room_rc.users.borrow_mut().push(Rc::downgrade(&user_rc));
-  user_rc
-}
-
-fn make_room(name: &str) -> Rc<Room> {
-  Rc::new(Room { name: name.to_string(), users: RefCell::new(Vec::new()) })
-}
 
 fn main() {
-   let mut users: HashMap<String, Rc<User>> = HashMap::new();
+  let rust_room: Rc<Room> = Rc::new(Room {
+      name: "rust".to_string(),
+      users: RefCell::new(vec![]),
+  });
+  let fosdem_room: Rc<Room> = Rc::new(Room {
+      name: "fosdem".to_string(),
+      users: RefCell::new(vec![]),
+  });
+  let user_mike: Rc<User> = Rc::new(User {
+      name: "mike".to_string(),
+      rooms: vec![rust_room.clone(), fosdem_room.clone()],
+  });
+  let user_ovidiu: Rc<User> = Rc::new(User {
+      name: "ovidiu".to_string(),
+      rooms: vec![rust_room.clone()],
+  });
 
-   let room_rc = make_room("rust");
+  rust_room.users.borrow_mut().push(Rc::downgrade(&user_mike));
+  rust_room.users.borrow_mut().push(Rc::downgrade(&user_ovidiu));
+  fosdem_room.users.borrow_mut().push(Rc::downgrade(&user_mike));
 
-   users.insert("ovidiu".to_string(), make_user(&room_rc));
-   users.insert("mike".to_string(), make_user(&room_rc));
-
-   print_users(&users);
-   drop(room_rc);
-   
-   let room_rc = make_room("fosdem");
-   users.insert("niels".to_string(), make_user(&room_rc));
-   users.insert("victor".to_string(), make_user(&room_rc));
-
-   drop(room_rc);
-
-   users.remove("victor");
-   print_users(&users);
-   users.remove("niels");
-
-   print_users(&users);
-
+  print_users_in_a_room(&rust_room);
+  print_users_in_a_room(&fosdem_room);
+  drop(user_mike);
+  print_users_in_a_room(&rust_room);
+  print_users_in_a_room(&fosdem_room);
+  drop(user_ovidiu);
+  print_users_in_a_room(&rust_room);
+  print_users_in_a_room(&fosdem_room);
 }
 
-fn print_users(users: &HashMap<String, Rc<User>>) {
-  println!("############## Users in the system:");
-  for (name, user) in users {
-    println!("{} is in room {} with rc {}, wc {}", name, user.room.name, 
-      Rc::<Room>::strong_count(&user.room), Rc::<Room>::weak_count(&user.room));
-    println!("  Users in room:");
-    for u in user.room.users.borrow().iter() {
-      if let Some(u) = u.upgrade() {
-        println!("    {:?}", u);
+fn print_users_in_a_room(room: &Rc<Room>) {
+  for u in room.users.borrow().iter() {
+      match u.upgrade() {
+          Some(u) => println!("User {} in room {}", u.name, room.name),
+          None => {
+              println!("Should not be possible because the user is dropped from the room with retain filter");
+          },
       }
-    }
   }
 }
-
-
